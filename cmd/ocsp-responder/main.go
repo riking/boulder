@@ -21,11 +21,11 @@ import (
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/github.com/facebookgo/httpdown"
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/github.com/jmhodges/clock"
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/golang.org/x/crypto/ocsp"
-	"github.com/letsencrypt/boulder/metrics"
 
 	"github.com/letsencrypt/boulder/cmd"
 	"github.com/letsencrypt/boulder/core"
 	blog "github.com/letsencrypt/boulder/log"
+	"github.com/letsencrypt/boulder/metrics"
 	"github.com/letsencrypt/boulder/sa"
 )
 
@@ -117,7 +117,7 @@ func makeDBSource(dbMap dbSelector, issuerCert string, log *blog.AuditLogger) (*
 
 func main() {
 	app := cmd.NewAppShell("boulder-ocsp-responder", "Handles OCSP requests")
-	app.Action = func(c cmd.Config, stats statsd.Statter, auditlogger *blog.AuditLogger) {
+	app.Action = func(c cmd.Config, stats metrics.Statter, auditlogger *blog.AuditLogger) {
 		go cmd.DebugServer(c.OCSPResponder.DebugAddr)
 
 		go cmd.ProfileCmd("OCSP", stats)
@@ -138,9 +138,7 @@ func main() {
 			auditlogger.Info(fmt.Sprintf("Loading OCSP Database for CA Cert: %s", c.Common.IssuerCert))
 			dbMap, err := sa.NewDbMap(config.Source)
 			cmd.FailOnError(err, "Could not connect to database")
-			if c.SQL.SQLDebug {
-				sa.SetSQLDebug(dbMap, true)
-			}
+			sa.SetSQLDebug(dbMap, auditlogger)
 			source, err = makeDBSource(dbMap, c.Common.IssuerCert, auditlogger)
 			cmd.FailOnError(err, "Couldn't load OCSP DB")
 		} else if url.Scheme == "file" {
