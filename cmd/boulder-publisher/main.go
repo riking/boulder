@@ -12,9 +12,11 @@ import (
 
 	"github.com/letsencrypt/boulder/cmd"
 	"github.com/letsencrypt/boulder/core"
+	bgrpc "github.com/letsencrypt/boulder/grpc"
 	blog "github.com/letsencrypt/boulder/log"
 	"github.com/letsencrypt/boulder/metrics"
 	"github.com/letsencrypt/boulder/publisher"
+	pb "github.com/letsencrypt/boulder/publisher/proto"
 	"github.com/letsencrypt/boulder/rpc"
 )
 
@@ -49,13 +51,19 @@ func main() {
 		amqpConf := c.Publisher.AMQP
 		pubi.SA, err = rpc.NewStorageAuthorityClient(clientName, amqpConf, stats)
 		cmd.FailOnError(err, "Unable to create SA client")
+		if c.Publisher.GRPC != nil {
+			s, l, err := bgrpc.NewServer(c.Publisher.GRPC)
+			pb.RegisterPublisherServer(s, publisher.GRPCWrapper{pubi})
+			err = s.Serve(*l)
+			cmd.FailOnError(err, "Publisher gRPC service failed")
+		} else {
+			pubs, err := rpc.NewAmqpRPCServer(amqpConf, c.Publisher.MaxConcurrentRPCServerRequests, stats)
+			cmd.FailOnError(err, "Unable to create Publisher RPC server")
+			rpc.NewPublisherServer(pubs, pubi)
 
-		pubs, err := rpc.NewAmqpRPCServer(amqpConf, c.Publisher.MaxConcurrentRPCServerRequests, stats)
-		cmd.FailOnError(err, "Unable to create Publisher RPC server")
-		rpc.NewPublisherServer(pubs, pubi)
-
-		err = pubs.Start(amqpConf)
-		cmd.FailOnError(err, "Unable to run Publisher RPC server")
+			err = pubs.Start(amqpConf)
+			cmd.FailOnError(err, "Unable to run Publisher RPC server")
+		}
 	}
 
 	app.Run()

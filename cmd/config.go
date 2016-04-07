@@ -245,6 +245,7 @@ type ServiceConfig struct {
 	// DebugAddr is the address to run the /debug handlers on.
 	DebugAddr string
 	AMQP      *AMQPConfig
+	GRPC      *GRPCServerConfig
 }
 
 // DBConfig defines how to connect to a database. The connect string may be
@@ -340,6 +341,8 @@ type CAConfig struct {
 	// EnableMustStaple governs whether the Must Staple extension in CSRs
 	// triggers issuance of certificates with Must Staple.
 	EnableMustStaple bool
+
+	Publisher *GRPCClientConfig
 }
 
 // PAConfig specifies how a policy authority should connect to its
@@ -501,12 +504,20 @@ type LogDescription struct {
 	Key string
 }
 
-// CAAConfig contains the information needed to talk to the CAA service
-// over gRPC
+// GRPCClientConfig contains the information needed to talk to the gRPC service
 type GRPCClientConfig struct {
 	ServerAddress         string
 	ServerHostname        string
 	ServerIssuerPath      string
 	ClientCertificatePath string
 	ClientKeyPath         string
+	Timeout               ConfigDuration
+}
+
+// GRPCServerConfig contains the information needed to run a gRPC service
+type GRPCServerConfig struct {
+	Address               string
+	ServerCertificatePath string
+	ServerKeyPath         string
+	ClientIssuerPath      string
 }

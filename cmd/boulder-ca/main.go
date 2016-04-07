@@ -15,14 +15,17 @@ import (
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/github.com/cloudflare/cfssl/helpers"
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/github.com/jmhodges/clock"
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/github.com/letsencrypt/pkcs11key"
+	"github.com/letsencrypt/boulder/Godeps/_workspace/src/google.golang.org/grpc"
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/gopkg.in/gorp.v1"
 
 	"github.com/letsencrypt/boulder/ca"
 	"github.com/letsencrypt/boulder/cmd"
 	"github.com/letsencrypt/boulder/core"
+	bgrpc "github.com/letsencrypt/boulder/grpc"
 	blog "github.com/letsencrypt/boulder/log"
 	"github.com/letsencrypt/boulder/metrics"
 	"github.com/letsencrypt/boulder/policy"
+	pb "github.com/letsencrypt/boulder/publisher/proto"
 	"github.com/letsencrypt/boulder/rpc"
 	"github.com/letsencrypt/boulder/sa"
 )
@@ -147,8 +150,17 @@ func main() {
 		cai.SA, err = rpc.NewStorageAuthorityClient(clientName, amqpConf, stats)
 		cmd.FailOnError(err, "Failed to create SA client")
 
-		cai.Publisher, err = rpc.NewPublisherClient(clientName, amqpConf, stats)
-		cmd.FailOnError(err, "Failed to create Publisher client")
+		if c.CA.Publisher != nil {
+			creds, err := bgrpc.LoadClientCreds(c.CA.Publisher)
+			cmd.FailOnError(err, "Failed to load gRPC client and issuer certificates")
+			conn, err := grpc.Dial(c.CA.Publisher.ServerAddress, grpc.WithTransportCredentials(creds))
+			cmd.FailOnError(err, "Failed to dial CAA service")
+			cai.GRPCPublisher = pb.NewPublisherClient(conn)
+			cai.GRPCTimeout = c.CA.Publisher.Timeout.Duration
+		} else {
+			cai.Publisher, err = rpc.NewPublisherClient(clientName, amqpConf, stats)
+			cmd.FailOnError(err, "Failed to create Publisher client")
+		}
 
 		cas, err := rpc.NewAmqpRPCServer(amqpConf, c.CA.MaxConcurrentRPCServerRequests, stats)
 		cmd.FailOnError(err, "Unable to create CA RPC server")

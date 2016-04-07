@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+service Publisher {
+        rpc SubmitToCT(Request) returns (Empty) {}
+}
+
+message Request {
+        bytes der = 1;
+}
+
+message Empty {
+}
