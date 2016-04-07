@@ -74,6 +74,7 @@ func setup(t *testing.T) (*OCSPUpdater, core.StorageAuthority, *gorp.DbMap, cloc
 		dbMap,
 		&mockCA{},
 		&mockPub{sa},
+		nil,
 		sa,
 		cmd.OCSPUpdaterConfig{
 			NewCertificateBatchSize: 1,

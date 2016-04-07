@@ -17,13 +17,17 @@ import (
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/github.com/cactus/go-statsd-client/statsd"
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/github.com/jmhodges/clock"
 	"github.com/letsencrypt/boulder/Godeps/_workspace/src/golang.org/x/crypto/ocsp"
+	"github.com/letsencrypt/boulder/Godeps/_workspace/src/golang.org/x/net/context"
+	"github.com/letsencrypt/boulder/Godeps/_workspace/src/google.golang.org/grpc"
 	gorp "github.com/letsencrypt/boulder/Godeps/_workspace/src/gopkg.in/gorp.v1"
 
 	"github.com/letsencrypt/boulder/akamai"
 	"github.com/letsencrypt/boulder/cmd"
 	"github.com/letsencrypt/boulder/core"
+	bgrpc "github.com/letsencrypt/boulder/grpc"
 	blog "github.com/letsencrypt/boulder/log"
 	"github.com/letsencrypt/boulder/metrics"
+	pubPB "github.com/letsencrypt/boulder/publisher/proto"
 	"github.com/letsencrypt/boulder/rpc"
 	"github.com/letsencrypt/boulder/sa"
 )
@@ -36,9 +40,11 @@ type OCSPUpdater struct {
 
 	dbMap *gorp.DbMap
 
-	cac  core.CertificateAuthority
-	pubc core.Publisher
-	sac  core.StorageAuthority
+	cac         core.CertificateAuthority
+	pubc        core.Publisher
+	gpubc       pubPB.PublisherClient
+	grpcTimeout time.Duration
+	sac         core.StorageAuthority
 
 	// Used  to calculate how far back stale OCSP responses should be looked for
 	ocspMinTimeToExpiry time.Duration
@@ -61,6 +67,7 @@ func newUpdater(
 	dbMap *gorp.DbMap,
 	ca core.CertificateAuthority,
 	pub core.Publisher,
+	gpub pubPB.PublisherClient,
 	sac core.StorageAuthority,
 	config cmd.OCSPUpdaterConfig,
 	numLogs int,
@@ -87,6 +94,7 @@ func newUpdater(
 		log:                 log,
 		sac:                 sac,
 		pubc:                pub,
+		gpubc:               gpub,
 		numLogs:             numLogs,
 		ocspMinTimeToExpiry: config.OCSPMinTimeToExpiry.Duration,
 		oldestIssuedSCT:     config.OldestIssuedSCT.Duration,
@@ -478,7 +486,14 @@ func (updater *OCSPUpdater) missingReceiptsTick(batchSize int) error {
 			updater.log.AuditErr(fmt.Errorf("Failed to get certificate: %s", err))
 			continue
 		}
-		err = updater.pubc.SubmitToCT(cert.DER)
+
+		if updater.gpubc != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), updater.grpcTimeout)
+			defer cancel()
+			_, err = updater.gpubc.SubmitToCT(ctx, &pubPB.Request{cert.DER})
+		} else {
+			err = updater.pubc.SubmitToCT(cert.DER)
+		}
 		if err != nil {
 			updater.log.AuditErr(fmt.Errorf("Failed to submit certificate to CT log: %s", err))
 			continue
@@ -542,19 +557,30 @@ const clientName = "OCSP"
 func setupClients(c cmd.OCSPUpdaterConfig, stats metrics.Statter) (
 	core.CertificateAuthority,
 	core.Publisher,
+	pubPB.PublisherClient,
 	core.StorageAuthority,
 ) {
 	amqpConf := c.AMQP
 	cac, err := rpc.NewCertificateAuthorityClient(clientName, amqpConf, stats)
 	cmd.FailOnError(err, "Unable to create CA client")
 
-	pubc, err := rpc.NewPublisherClient(clientName, amqpConf, stats)
-	cmd.FailOnError(err, "Unable to create Publisher client")
+	var pubc core.Publisher
+	var gpubc pubPB.PublisherClient
+	if c.Publisher != nil {
+		creds, err := bgrpc.LoadClientCreds(c.Publisher)
+		cmd.FailOnError(err, "Failed to load gRPC client and issuer certificates")
+		conn, err := grpc.Dial(c.Publisher.ServerAddress, grpc.WithTransportCredentials(creds))
+		cmd.FailOnError(err, "Failed to dial CAA service")
+		gpubc = pubPB.NewPublisherClient(conn)
+	} else {
+		pubc, err = rpc.NewPublisherClient(clientName, amqpConf, stats)
+		cmd.FailOnError(err, "Unable to create Publisher client")
+	}
 
 	sac, err := rpc.NewStorageAuthorityClient(clientName, amqpConf, stats)
 	cmd.FailOnError(err, "Unable to create SA client")
 
-	return cac, pubc, sac
+	return cac, pubc, gpubc, sac
 }
 
 func main() {
@@ -571,7 +597,7 @@ func main() {
 		dbMap, err := sa.NewDbMap(dbURL)
 		cmd.FailOnError(err, "Could not connect to database")
 
-		cac, pubc, sac := setupClients(conf, stats)
+		cac, pubc, gpubc, sac := setupClients(conf, stats)
 
 		updater, err := newUpdater(
 			stats,
@@ -579,12 +605,16 @@ func main() {
 			dbMap,
 			cac,
 			pubc,
+			gpubc,
 			sac,
 			// Necessary evil for now
 			conf,
 			len(c.Common.CT.Logs),
 			c.Common.IssuerCert,
 		)
+		if updater.gpubc != nil {
+			updater.grpcTimeout = c.OCSPUpdater.Publisher.Timeout.Duration
+		}
 
 		cmd.FailOnError(err, "Failed to create updater")
 

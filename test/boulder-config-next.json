@@ -272,6 +272,14 @@
     "signFailureBackoffFactor": 1.2,
     "signFailureBackoffMax": "30m",
     "debugAddr": "localhost:8006",
+    "publisher": {
+      "serverAddress": "127.0.0.1:9091",
+      "serverHostname": "localhost",
+      "serverIssuerPath": "test/grpc-creds/ca.der",
+      "clientCertificatePath": "test/grpc-creds/client.pem",
+      "clientKeyPath": "test/grpc-creds/key.pem",
+      "timeout": "10s"
+    },
     "amqp": {
       "serverURLFile": "test/secrets/amqp_url",
       "insecure": true,
@@ -281,10 +289,6 @@
       },
       "CA": {
         "server": "CA.server",
-        "rpcTimeout": "15s"
-      },
-      "Publisher": {
-        "server": "Publisher.server",
         "rpcTimeout": "15s"
       }
     }
