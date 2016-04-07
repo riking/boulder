@@ -7,7 +7,7 @@
 set -e
 
 go get \
-  golang.org/x/tools/cmd/vet \
+  #golang.org/x/tools/cmd/vet \
   golang.org/x/tools/cmd/cover \
   github.com/golang/lint/golint \
   github.com/tools/godep \
